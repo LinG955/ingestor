@@ -18,5 +18,9 @@
       "limit": "100kb"
     },
     "cors": false
-  }
+  },
+  "ipPrefix": "http://localhost:3000/api/",
+  "accessGroups": [
+    "NSRL", "HLS-II"
+  ]
 }

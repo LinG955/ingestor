@@ -33,7 +33,16 @@ boot(app, __dirname, function (err) {
     app.start();
 });
 
+
+
+/**
+ * 元数据写入程序
+ */
+
 var bodyParser = require("body-parser");
+var httpReq = require('request');
+const config = require('./config.json');
+
 // to support JSON-encoded bodies
 app.middleware(
   "parse",
@@ -50,210 +59,300 @@ app.middleware(
   })
 );
 
-//定义队列以及操作方法
+// SciCat后端接口
+const ipPrefix = config.ipPrefix;
+const url_login = `${ipPrefix}v3/Users/login`;
+const url_addUserGroup = `${ipPrefix}connectUserAndGroups`;
+const url_rawDataset = `${ipPrefix}v3/RawDatasets`;
+const url_proposal = `${ipPrefix}v3/Proposals`;
+const url_sample = `${ipPrefix}v3/Samples`;
+const url_instrument = `${ipPrefix}v3/Instruments`;
+const url_origDatablock = `${ipPrefix}v3/OrigDatablocks`;
+const url_StorageSystem = `${ipPrefix}getTest`;
 
+//定义队列以及操作方法，以存储多个实验站同时发送过来的元数据
 function Queue() {
   this.dataStore = [];
   this.enqueue = enqueue;     //入队
   this.dequeue = dequeue;     //出队
   this.front = front;         //查看队首元素
   this.back = back;           //查看队尾元素
-  this.toString = toString;   //显示队列所有元素
-  this.clear = clear;         //清空当前队列
   this.empty = empty;         //判断当前队列是否为空
-  this.queueLen = queueLen;   //查看队列长度
 }
-
 //向队列末尾添加一个元素，直接调用 push 方法即可
 function enqueue(element) {
   this.dataStore.push(element);
 }
-
-//删除队列首的元素，可以利用 JS 数组中的 shift 方法
+//删除队列首的元素，并返回该元素
 function dequeue() {
   if (this.empty()) return 'This queue is empty';
-  else this.dataStore.shift();
+  else return this.dataStore.shift();
 }
-
 //判断队列是否为空
 function empty() {
   if (this.dataStore.length == 0) return true;
   else return false;
 }
-
 //查看队首元素
 function front() {
   if (this.empty()) return 'This queue is empty';
   else return this.dataStore[0];
 }
-
 //读取队列尾的元素
 function back() {
   if (this.empty()) return 'This queue is empty';
   else return this.dataStore[this.dataStore.length - 1];
 }
 
-//清空当前队列
-function clear() {
-  delete this.dataStore;
-  this.dataStor = [];
-}
-
-//查看队列所有元素
-function toString() {
-  return this.dataStore.join('\n');
-}
-
-//队列长度
-function queueLen() {
-  return this.dataStore.length;
-}
-
-var httpReq = require('request');
-var httpReqPrm = require('request-promise');
 var queue = new Queue();
-var accessToken = 'HmfoOgKBxet19hQGb1enjiBB8Ds0gRSiNNEt6debbvd46IeEDxmO3qEnpKAMrnUM';
+var accessToken = 'brts2QZiKnKk7ml9qwc6WZ8hSBuAJRUz8qJ41bb92b9X6ZcBAj7SaTC42DhmFUGl';
 var busyFlag = false;
 
-//监听队列的变化，调用Catamel写入函数
+//引入Nodejs的事件驱动模块
 var EventEmitter = require('events').EventEmitter;
 var event = new EventEmitter();
 
-const url_login = 'http://222.195.82.151:3000/api/v1/Users/login';
-const url_addGroupUser = 'http://222.195.82.151:3000/api/connectUserAndGroups';
-const url_rawDataset = 'http://222.195.82.151:3000/api/v1/RawDatasets';
-const url_proposal = 'http://222.195.82.151:3000/api/v1/Proposals';
-const url_sample = 'http://222.195.82.151:3000/api/v1/Samples';
-const url_instrument = 'http://222.195.82.151:3000/api/v1/Instruments';
-const url_origDatablocks = 'http://222.195.82.151:3000/api/v1/OrigDatablocks';
-const url_test = 'http://222.195.82.151:3000/api/test';
-
+/**
+ * 使用队列存储由采集系统通过HTTP提交的元数据，并触发sendMetadata事件
+ */
 app.post('/api/ingest', (req, res) => {
   queue.enqueue(req.body);
-  event.emit('some_event');
-  res.send('ok');
+  // 事件驱动是异步的，因此采集系统无需等待即可收到'ok'
+  event.emit('sendMetadata');
+  res.status(200).send('ok');
 });
 
-event.on('some_event', function () {
-
-  singleSend();
-
-});
-
-function updateAccessToken() {
-  if (accessToken == '') {
-    httpReqPrm({
-      url: url_login,
-      method: "POST",
-      json: true,
-      headers: {
-        "content-type": "application/json",
-      },
-      body: {
-        "username": "ingestor",
-        "password": "nsrl@ingestor"
-      }
-    })
-      .then(function (parsedBody) {
-        // POST succeeded...
-        console.log('-------0');
-        accessToken = parsedBody.id;
-        console.log('accessToken: ', accessToken);
-        sendToCatamel();
-      })
-      .catch(function (err) {
-        // POST failed...
-      });
-
+/**
+ * 在sendMetadata事件中，调用sendToCatamel()向SciCat后端发送元数据
+ */
+event.on('sendMetadata', async function () {
+  // 在向SciCat后端发送元数据的过程中，busyFlag使得事件驱动不会打断sendToCatamel()的执行
+  // 直至处理完队列中的数据，再允许事件驱动执行sendToCatamel()
+  if (!busyFlag) {
+    busyFlag = true;
+    sendToCatamel();
   }
+});
+
+/**
+ * 向SciCat后端发送元数据
+ */
+async function sendToCatamel() {
+  while (!queue.empty()) {
+    // 获取每一次实验的多组元数据对象，提取其值存储在数组
+    var multipleMetaObj = queue.dequeue();
+    var multipleMetaValue = [];
+    Object.keys(multipleMetaObj).forEach(index => {
+      multipleMetaValue.push(multipleMetaObj[index]);
+    });
+
+    // 循环发送每一次实验中的每一组元数据
+    for (let index = 0; index < multipleMetaValue.length; index++) {
+      const singleSetMeta = multipleMetaValue[index];
+      await singleSend(singleSetMeta);
+    }
+  }
+  // 队列中缓存的元数据已经处理完毕，允许事件驱动再次执行sendToCatamel()
+  busyFlag = false;
 }
 
-function sendToCatamel() {
+/**
+ * 发送一组元数据(涉及User、Role、Proposal、Sample、Instrument、rawDataset、OrigDatablock等数据模型)
+ * @param {*} singleSetMeta 
+ */
+async function singleSend(singleSetMeta) {
 
+  // 以sourceFolder为参数，获取存储系统的元数据
+  var sourceFolder = singleSetMeta.sourceFolder
+  var retStorageMeta = await getMataDataFromStorageSystem(sourceFolder);
+
+  // 用户分组
+  var userGroupBody = {
+    "group": `P${singleSetMeta.proposalId}`,
+    "users": singleSetMeta.groupMembers
+  }
+  var retUserGroup = await addUserGroup(userGroupBody);
+
+  // 写入Proposal模型
+  var proposalBody = {
+    "ownerGroup": `P${singleSetMeta.proposalId}`,
+    "accessGroups": config.accessGroups,
+    "proposalId": singleSetMeta.proposalId,
+    "email": singleSetMeta.contactEmail,
+    "firstname": singleSetMeta.owner,
+    "title": singleSetMeta.title,
+    "startTime": singleSetMeta.startTime
+  };
+  var retProposal = await addProposal(proposalBody);
+
+  // 写入Sample模型
+  var sampleBody = {
+    "ownerGroup": `P${singleSetMeta.proposalId}`,
+    "accessGroups": config.accessGroups,
+    "sampleId": singleSetMeta.sampleId,
+    "owner": singleSetMeta.owner,
+    "description": singleSetMeta.Sample_description,
+    "sampleCharacteristics": singleSetMeta.sampleCharacteristics,
+    "isPublished": false
+  };
+  var retSample = await addSample(sampleBody);
+
+  // 写入Instrument模型
+  var instrumentBody = {
+    "name": singleSetMeta.Instrument_name,
+    "customMetadata": singleSetMeta.Instrument_customMetadata
+  };
+  var retInstrument = await addInstrument(instrumentBody);
+
+  // 写入RawDataset模型
+  var rawDatasetBody = {
+    "ownerGroup": `P${singleSetMeta.proposalId}`,
+    "accessGroups": config.accessGroups,
+    "owner": singleSetMeta.owner,
+    "ownerEmail": singleSetMeta.contactEmail,
+    "contactEmail": singleSetMeta.contactEmail,
+    "sourceFolder": singleSetMeta.sourceFolder,
+    "sourceFolderHost": singleSetMeta.sourceFolderHost,
+    "size": retStorageMeta.size,
+    "packedSize": retStorageMeta.packedSize,
+    "numberOfFiles": retStorageMeta.numberOfFiles,
+    "creationTime": singleSetMeta.creationTime,
+    "description": singleSetMeta.description,
+    "datasetName": singleSetMeta.datasetName,
+    "isPublished": false,
+    "instrumentId": retInstrument.pid,
+    "principalInvestigator": singleSetMeta.contactEmail,
+    "endTime": singleSetMeta.endTime,
+    "creationLocation": singleSetMeta.creationLocation,
+    "dataFormat": singleSetMeta.dataFormat,
+    "scientificMetadata": singleSetMeta.scientificMetadata,
+    "proposalId": singleSetMeta.proposalId,
+    "sampleId": singleSetMeta.sampleId
+  };
+  var retRawDataset = await addRawDataset(rawDatasetBody);
+
+  // 写入OrigDatablock模型
+  var origDatablockBody = {
+    "ownerGroup": `P${singleSetMeta.proposalId}`,
+    "accessGroups": config.accessGroups,
+    "size": retStorageMeta.OrigDatablock_size,
+    "dataFileList": retStorageMeta.dataFileList,
+    "datasetId": retRawDataset.pid,
+    "rawDatasetId": retRawDataset.pid
+  };
+  var retOrigDatablock = await addOrigDatablock(origDatablockBody);
 }
 
-async function singleSend() {
-  var retUserBody = await addUserGroup();
-  console.log('------1: ', retUserBody);
-  // var retInstrumentBody = await addInstrument();
-  var retProposalBody = await addProposal();
-  console.log('------2: ', retProposalBody);
-}
-
-async function addUserGroup() {
+/**
+ * 以sourceFolder为HTTP GET请求参数，获取存储系统的元数据
+ * @param {*} sourceFolder 
+ */
+async function getMataDataFromStorageSystem(sourceFolder) {
   return new Promise((resolve, reject) => {
-    var userBody = {
-      "group": "P2019-HLS-PT-002433",
-      "users": [
-          {
-              "userName": "潘卓",
-              "name": "潘卓",
-              "email": "panzhuo@pku.edu.cn"
-          },
-          {
-              "userName": "zhxcao",
-              "name": "曹正轩",
-              "email": "zhxcao@pku.edu.cn"
-          },
-          {
-              "userName": "zhxcao",
-              "name": "曹正轩",
-              "email": "zhxcao@pku.edu.cn"
-          },
-          {
-              "userName": "梅竹松",
-              "name": "梅竹松",
-              "email": "mzsong@pku.edu.cn"
-          }
-      ]
-    };
+    // 客户端HTTP请求最大等待时间timeout设为5分钟，服务端也需要设置timeout才起效
+    // 否则nodejs默认timeout为2分钟
     httpReq({
-      url: url_addGroupUser + '?access_token=' + accessToken,
-      method: "POST",
-      json: true,
-      headers: {
-        "content-type": "application/json",
-      },
-      body: userBody
-    }, function (error, response, retUserBody) {
+      url: `${url_StorageSystem}?sourceFolder=${sourceFolder}`,
+      method: "GET",
+      timeout: 300000,
+    }, function (error, response, retStorageMetaBody) {
       if (error) {
-        return {statusCode: 500, message: "POST User error!"};
+        return { statusCode: 500, message: "GET Storage System Error!" };
       }
       if (!error && response.statusCode == 200) {
-        console.log('retUserBody: ', retUserBody);
-        resolve(retUserBody);
+        console.log('retStorageMetaBody: ', JSON.parse(retStorageMetaBody));
+        resolve(JSON.parse(retStorageMetaBody));
       }
     });
   });
 }
 
-// 先通过proposalId判断Proposal实例是否存在，不存在则写入Proposal
-async function addProposal() {
+/**
+ * 将用户分组，只需传入分组名称和用户数组，SciCat后端会处理
+ * 因为这是第一个涉及到accessToken的HTTP请求，所以在此方法嵌入更新accessToken逻辑
+ * @param {*} userGroupBody 
+ */
+async function addUserGroup(userGroupBody) {
   return new Promise((resolve, reject) => {
-    var proposalBody = {
-      "ownerGroup": "P2019-HLS-PT-002433",
-      "accessGroups": [
-        "NSRL","HLS-II"
-      ],
-      "proposalId": "2019-HLS-PT-002433",  
-      "email": "panzhuo@pku.edu.cn",
-      "firstname": "潘卓",
-      "title": "string",  
-      "startTime": "2020-09-25T07:33:45.432Z"
-    };
-    var proposalId = '2019-HLS-PT-002433';
+    httpReq({
+      url: `${url_addUserGroup}?access_token=${accessToken}`,
+      method: "POST",
+      json: true,
+      headers: {
+        "content-type": "application/json",
+      },
+      body: userGroupBody
+    }, function (error, response, retUserGroupBody) {
+      // 如果accessToken过期，先更新accessToken
+      if (response.statusCode == 401) {
+        httpReq({
+          url: url_login,
+          method: "POST",
+          json: true,
+          headers: {
+            "content-type": "application/json",
+          },
+          body: {
+            "username": "ingestor",
+            "password": "nsrl@ingestor"
+          }
+        }, function (error, response, loginBody) {
+          if (error) {
+            return { statusCode: 500, message: "Ingestor Login Error!" };
+          }
+          if (!error && response.statusCode == 200) {
+            accessToken = loginBody.id;
+            // accessToken更新完毕，开始用户分组
+            httpReq({
+              url: `${url_addUserGroup}?access_token=${accessToken}`,
+              method: "POST",
+              json: true,
+              headers: {
+                "content-type": "application/json",
+              },
+              body: userGroupBody
+            }, function (error, response, retUserGroupBody) {
+              if (error) {
+                return { statusCode: 500, message: "POST UserGroup Error!" };
+              }
+              if (!error && response.statusCode == 200) {
+                console.log('retUserGroupBody: ', retUserGroupBody);
+                resolve(retUserGroupBody);
+              }
+            });
+          }
+        });
+      // accessToken没过期
+      } else if (!error && response.statusCode == 200) {
+        console.log('retUserGroupBody: ', retUserGroupBody);
+        resolve(retUserGroupBody);
+      } else {
+        return { statusCode: 500, message: "POST UserGroup Error!" };
+      }
+    });
+  });
+}
 
+/**
+ * 先通过proposalId判断Proposal实例是否存在，不存在则写入Proposal模型
+ * @param {*} proposalBody 
+ */
+async function addProposal(proposalBody) {
+  return new Promise((resolve, reject) => {
+
+    var proposalId = proposalBody.proposalId;
     var url_proposalIsExist = `${url_proposal}/${proposalId}/exists?access_token=${accessToken}`;
+
     httpReq(url_proposalIsExist, function (error, response, body) {
       if (!error && response.statusCode == 200) {
         // 返回的body是个字符串，需要转换成JSON再判断
-        if(JSON.parse(body).exists) {
+        if (JSON.parse(body).exists) {
           resolve('Proposal OK');
         } else {
 
           // 该Proposal不存在
           httpReq({
-            url: url_proposal + '?access_token=' + accessToken,
+            url: `${url_proposal}?access_token=${accessToken}`,
             method: "POST",
             json: true,
             headers: {
@@ -262,25 +361,29 @@ async function addProposal() {
             body: proposalBody
           }, function (error, response, retProposalBody) {
             if (error) {
-              return {statusCode: 500, message: "POST Proposal error!"};
+              return { statusCode: 500, message: "POST Proposal Error!" };
             }
             if (!error && response.statusCode == 200) {
-              // console.log('retProposalBody: ', retProposalBody);
+              console.log('retProposalBody: ', retProposalBody);
               resolve(retProposalBody);
             }
           });
         }
       }
     });
-    
+
   });
 }
 
-async function addSample() {
+/**
+ * 写入Sample模型
+ * @param {*} sampleBody 
+ */
+async function addSample(sampleBody) {
   return new Promise((resolve, reject) => {
-    var sampleBody = {};
+
     httpReq({
-      url: url_sample + '?access_token=' + accessToken,
+      url: `${url_sample}?access_token=${accessToken}`,
       method: "POST",
       json: true,
       headers: {
@@ -289,7 +392,7 @@ async function addSample() {
       body: sampleBody
     }, function (error, response, retSampleBody) {
       if (error) {
-        return {statusCode: 500, message: "POST Sample error!"};
+        return { statusCode: 500, message: "POST Sample Error!" };
       }
       if (!error && response.statusCode == 200) {
         console.log('retSampleBody: ', retSampleBody);
@@ -299,43 +402,106 @@ async function addSample() {
   });
 }
 
-async function getMataDataFromStorageSystem() {
+/**
+ * 先通过Instrument.name判断Instrument实例是否存在，不存在则写入Instrument
+ * @param {*} instrumentBody 
+ */
+async function addInstrument(instrumentBody) {
   return new Promise((resolve, reject) => {
-    var url_StorageSystem = '';
-    httpReq(url_StorageSystem, {timeout: 1500}, function (error, response, body) {
+
+    var name = instrumentBody.name;
+
+    httpReq({
+      url: `${url_instrument}/findOne`,
+      method: "GET",
+      qs: {
+        "filter": { "where": { "name": name } },
+        "AccessToken": accessToken
+      }
+    }, function (error, response, body) {
+      // 该Instrument不存在，会报错404
       if (!error && response.statusCode == 200) {
-        resolve(body);
+        // 返回的body是个字符串，需要转换成JSON再判断
+        resolve(JSON.parse(body));
+      } else {
+        // 写入Instrument模型
+        httpReq({
+          url: `${url_instrument}?access_token=${accessToken}`,
+          method: "POST",
+          json: true,
+          headers: {
+            "content-type": "application/json",
+          },
+          body: instrumentBody
+        }, function (error, response, retInstrumentBody) {
+          if (error) {
+            return { statusCode: 500, message: "POST Instrument Error!" };
+          }
+          if (!error && response.statusCode == 200) {
+            console.log('retInstrumentBody: ', retInstrumentBody);
+            resolve(retInstrumentBody);
+          }
+        });
       }
     });
+
   });
+
 }
 
-async function addInstrument() {
+/**
+ * 写入RawDataset模型
+ * @param {*} rawDatasetBody 
+ */
+async function addRawDataset(rawDatasetBody) {
   return new Promise((resolve, reject) => {
-    var instrumentBody = {
-      "name": "NSRL-HLS-BL07W",
-      "customMetadata": {}
-    };
+
     httpReq({
-      url: url_instrument + '?access_token=' + accessToken,
+      url: `${url_rawDataset}?access_token=${accessToken}`,
       method: "POST",
       json: true,
       headers: {
         "content-type": "application/json",
       },
-      body: instrumentBody
-    }, function (error, response, retInstrumentBody) {
+      body: rawDatasetBody
+    }, function (error, response, retRawDatasetBody) {
       if (error) {
-        return {statusCode: 500, message: "POST Instrument error!"};
+        return { statusCode: 500, message: "POST RawDataset Error!" };
       }
       if (!error && response.statusCode == 200) {
-        console.log('retInstrumentBody: ', retInstrumentBody);
-        resolve(retInstrumentBody);
+        console.log('retRawDatasetBody: ', retRawDatasetBody);
+        resolve(retRawDatasetBody);
       }
     });
   });
 }
 
+/**
+ * 写入OrigDatablock模型
+ * @param {*} origDatablockBody 
+ */
+async function addOrigDatablock(origDatablockBody) {
+  return new Promise((resolve, reject) => {
+
+    httpReq({
+      url: `${url_origDatablock}?access_token=${accessToken}`,
+      method: "POST",
+      json: true,
+      headers: {
+        "content-type": "application/json",
+      },
+      body: origDatablockBody
+    }, function (error, response, retOrigDatablock) {
+      if (error) {
+        return { statusCode: 500, message: "POST OrigDatablock Error!" };
+      }
+      if (!error && response.statusCode == 200) {
+        console.log('retOrigDatablock: ', retOrigDatablock);
+        resolve(retOrigDatablock);
+      }
+    });
+  });
+}
 
 
 
