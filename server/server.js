@@ -376,30 +376,45 @@ async function addProposal(proposalBody) {
 }
 
 /**
- * 写入Sample模型
+ * 先通过sampleId判断Sample实例是否存在，不存在则写入Sample模型
  * @param {*} sampleBody 
  */
 async function addSample(sampleBody) {
   return new Promise((resolve, reject) => {
 
-    httpReq({
-      url: `${url_sample}?access_token=${accessToken}`,
-      method: "POST",
-      json: true,
-      headers: {
-        "content-type": "application/json",
-      },
-      body: sampleBody
-    }, function (error, response, retSampleBody) {
-      if (error) {
-        return { statusCode: 500, message: "POST Sample Error!" };
-      }
+    var sampleId = sampleBody.sampleId;
+    var url_sampleIsExist = `${url_sample}/${sampleId}/exists?access_token=${accessToken}`;
+
+    httpReq(url_sampleIsExist, function (error, response, body) {
       if (!error && response.statusCode == 200) {
-        console.log('retSampleBody: ', retSampleBody);
-        resolve(retSampleBody);
+        // 返回的body是个字符串，需要转换成JSON再判断
+        if (JSON.parse(body).exists) {
+          resolve('Sample OK');
+        } else {
+
+          // 该Sample不存在
+          httpReq({
+            url: `${url_sample}?access_token=${accessToken}`,
+            method: "POST",
+            json: true,
+            headers: {
+              "content-type": "application/json",
+            },
+            body: sampleBody
+          }, function (error, response, retSampleBody) {
+            if (error) {
+              return { statusCode: 500, message: "POST Sample Error!" };
+            }
+            if (!error && response.statusCode == 200) {
+              console.log('retSampleBody: ', retSampleBody);
+              resolve(retSampleBody);
+            }
+          });
+        }
       }
     });
-  });
+
+  });    
 }
 
 /**
