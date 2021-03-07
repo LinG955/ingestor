@@ -69,6 +69,7 @@ const url_sample = `${ipPrefix}v3/Samples`;
 const url_instrument = `${ipPrefix}v3/Instruments`;
 const url_origDatablock = `${ipPrefix}v3/OrigDatablocks`;
 const url_StorageSystem = `${ipPrefix}getTest`;
+const url_attachment = `${ipPrefix}v3/Attachments`;
 
 //定义队列以及操作方法，以存储多个实验站同时发送过来的元数据
 function Queue() {
@@ -241,6 +242,23 @@ async function singleSend(singleSetMeta) {
     "rawDatasetId": retRawDataset.pid
   };
   var retOrigDatablock = await addOrigDatablock(origDatablockBody);
+
+  // 写入Attachment模型
+  const attachmentsArray = retStorageMeta.attachments;
+  for (let index = 0; index < attachmentsArray.length; index++) {
+    const attachmentSection = attachmentsArray[index];
+    var attachmentBody = {
+      "thumbnail": attachmentSection.thumbnail,
+      "caption": attachmentSection.caption,
+      "ownerGroup": `P${singleSetMeta.proposalId}`,
+      "accessGroups": config.accessGroups,
+      "proposalId": singleSetMeta.proposalId,
+      "sampleId": singleSetMeta.sampleId,
+      "datasetId": retRawDataset.pid,
+      "rawDatasetId": retRawDataset.pid
+    }
+    var retAttachment = await addAttachment(attachmentBody);
+  }
 }
 
 /**
@@ -516,6 +534,34 @@ async function addOrigDatablock(origDatablockBody) {
       }
     });
   });
+}
+
+/**
+ * 写入Attachment模型
+ * @param {*} attachmentBody 
+ */
+async function addAttachment(attachmentBody) {
+  return new Promise(
+    (resolve, reject) => {
+      httpReq({
+        url: `${url_attachment}?access_token=yBBCNnAG9Jnoqa51nTQZDVd9gCE4Y1fCV0PzZOxvJk5D5pjzygm5HvsLg43TD3se`,
+        method: "POST",
+        json: true,
+        headers: {
+          "content-type": "application/json",
+        },
+        body: attachmentBody
+      }, function (error, response, retAttachment) {
+        if (error) {
+          return { statusCode: 500, message: "POST Attachment Error!" };
+        }
+        if (!error && response.statusCode == 200) {
+          console.log('retAttachment: ', retAttachment);
+          resolve(retAttachment);
+        }
+      });
+    }
+  );
 }
 
 
