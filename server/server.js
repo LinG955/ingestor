@@ -181,8 +181,7 @@ async function singleSend(singleSetMeta) {
     "proposalId": singleSetMeta.proposalId,
     "email": singleSetMeta.contactEmail,
     "firstname": singleSetMeta.owner,
-    "title": singleSetMeta.title,
-    "startTime": singleSetMeta.startTime
+    "title": singleSetMeta.title
   };
   var retProposal = await addProposal(proposalBody);
 
@@ -200,8 +199,7 @@ async function singleSend(singleSetMeta) {
 
   // 写入Instrument模型
   var instrumentBody = {
-    "name": singleSetMeta.Instrument_name,
-    "customMetadata": singleSetMeta.Instrument_customMetadata
+    "name": singleSetMeta.Instrument_name
   };
   var retInstrument = await addInstrument(instrumentBody);
 
@@ -224,7 +222,7 @@ async function singleSend(singleSetMeta) {
     "instrumentId": retInstrument.pid,
     "principalInvestigator": singleSetMeta.contactEmail,
     "endTime": singleSetMeta.endTime,
-    "creationLocation": singleSetMeta.creationLocation,
+    "creationLocation": singleSetMeta.Instrument_name,
     "dataFormat": singleSetMeta.dataFormat,
     "scientificMetadata": singleSetMeta.scientificMetadata,
     "proposalId": singleSetMeta.proposalId,
