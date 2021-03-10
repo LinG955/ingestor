@@ -267,16 +267,23 @@ async function getMataDataFromStorageSystem(sourceFolder) {
   return new Promise((resolve, reject) => {
     // 客户端HTTP请求最大等待时间timeout设为5分钟，服务端也需要设置timeout才起效
     // 否则nodejs默认timeout为2分钟
+
+    // url参数中包含中文，需要进行编码
+    var sourceFolder_encode =encodeURI(sourceFolder);
+    console.log("sourceFolder_encode: ", sourceFolder_encode);
+
     httpReq({
-      url: `${url_StorageSystem}?sourceFolder=${sourceFolder}`,
+      url: `${url_StorageSystem}?sourceFolder=${sourceFolder_encode}`,
       method: "GET",
       timeout: 300000,
     }, function (error, response, retStorageMetaBody) {
       if (error) {
-        return { statusCode: 500, message: "GET Storage System Error!" };
+        console.log({ statusCode: 500, message: "GET Storage System Error!", detail: error});
+        console.log('-----------------------------------------------------------');
+        return;
       }
       if (!error && response.statusCode == 200) {
-        console.log('retStorageMetaBody: ', JSON.parse(retStorageMetaBody));
+        // console.log('retStorageMetaBody: ', JSON.parse(retStorageMetaBody));
         resolve(JSON.parse(retStorageMetaBody));
       }
     });
@@ -314,7 +321,9 @@ async function addUserGroup(userGroupBody) {
           }
         }, function (error, response, loginBody) {
           if (error) {
-            return { statusCode: 500, message: "Ingestor Login Error!" };
+            console.log({ statusCode: 500, message: "Ingestor Login Error!", detail: error});
+            console.log('-----------------------------------------------------------');
+            return;
           }
           if (!error && response.statusCode == 200) {
             accessToken = loginBody.id;
@@ -329,7 +338,9 @@ async function addUserGroup(userGroupBody) {
               body: userGroupBody
             }, function (error, response, retUserGroupBody) {
               if (error) {
-                return { statusCode: 500, message: "POST UserGroup Error!" };
+                console.log({ statusCode: 500, message: "POST UserGroup Error!", detail: error});
+                console.log('-----------------------------------------------------------');
+                return;
               }
               if (!error && response.statusCode == 200) {
                 console.log('retUserGroupBody: ', retUserGroupBody);
@@ -343,7 +354,9 @@ async function addUserGroup(userGroupBody) {
         console.log('retUserGroupBody: ', retUserGroupBody);
         resolve(retUserGroupBody);
       } else {
-        return { statusCode: 500, message: "POST UserGroup Error!" };
+        console.log({ statusCode: 500, message: "POST UserGroup Error!", detail: error});
+        console.log('-----------------------------------------------------------');
+        return;
       }
     });
   });
@@ -377,7 +390,9 @@ async function addProposal(proposalBody) {
             body: proposalBody
           }, function (error, response, retProposalBody) {
             if (error) {
-              return { statusCode: 500, message: "POST Proposal Error!" };
+              console.log({ statusCode: 500, message: "POST Proposal Error!", detail: error});
+              console.log('-----------------------------------------------------------');
+              return;
             }
             if (!error && response.statusCode == 200) {
               console.log('retProposalBody: ', retProposalBody);
@@ -419,7 +434,9 @@ async function addSample(sampleBody) {
             body: sampleBody
           }, function (error, response, retSampleBody) {
             if (error) {
-              return { statusCode: 500, message: "POST Sample Error!" };
+              console.log({ statusCode: 500, message: "POST Sample Error!", detail: error});
+              console.log('-----------------------------------------------------------');
+              return;
             }
             if (!error && response.statusCode == 200) {
               console.log('retSampleBody: ', retSampleBody);
@@ -466,7 +483,9 @@ async function addInstrument(instrumentBody) {
           body: instrumentBody
         }, function (error, response, retInstrumentBody) {
           if (error) {
-            return { statusCode: 500, message: "POST Instrument Error!" };
+            console.log({ statusCode: 500, message: "POST Instrument Error!", detail: error});
+            console.log('-----------------------------------------------------------');
+            return;
           }
           if (!error && response.statusCode == 200) {
             console.log('retInstrumentBody: ', retInstrumentBody);
@@ -497,7 +516,9 @@ async function addRawDataset(rawDatasetBody) {
       body: rawDatasetBody
     }, function (error, response, retRawDatasetBody) {
       if (error) {
-        return { statusCode: 500, message: "POST RawDataset Error!" };
+        console.log({ statusCode: 500, message: "POST RawDataset Error!", detail: error});
+        console.log('-----------------------------------------------------------');
+        return;
       }
       if (!error && response.statusCode == 200) {
         console.log('retRawDatasetBody: ', retRawDatasetBody);
@@ -524,7 +545,9 @@ async function addOrigDatablock(origDatablockBody) {
       body: origDatablockBody
     }, function (error, response, retOrigDatablock) {
       if (error) {
-        return { statusCode: 500, message: "POST OrigDatablock Error!" };
+        console.log({ statusCode: 500, message: "POST OrigDatablock Error!", detail: error});
+        console.log('-----------------------------------------------------------');
+        return;
       }
       if (!error && response.statusCode == 200) {
         console.log('retOrigDatablock: ', retOrigDatablock);
@@ -542,7 +565,7 @@ async function addAttachment(attachmentBody) {
   return new Promise(
     (resolve, reject) => {
       httpReq({
-        url: `${url_attachment}?access_token=yBBCNnAG9Jnoqa51nTQZDVd9gCE4Y1fCV0PzZOxvJk5D5pjzygm5HvsLg43TD3se`,
+        url: `${url_attachment}?access_token=${accessToken}`,
         method: "POST",
         json: true,
         headers: {
@@ -551,7 +574,9 @@ async function addAttachment(attachmentBody) {
         body: attachmentBody
       }, function (error, response, retAttachment) {
         if (error) {
-          return { statusCode: 500, message: "POST Attachment Error!" };
+          console.log({ statusCode: 500, message: "POST Attachment Error!", detail: error});
+          console.log('-----------------------------------------------------------');
+          return;
         }
         if (!error && response.statusCode == 200) {
           console.log('retAttachment: ', retAttachment);
