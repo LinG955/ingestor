@@ -106,7 +106,7 @@ function back() {
 }
 
 var queue = new Queue();
-var accessToken = 'brts2QZiKnKk7ml9qwc6WZ8hSBuAJRUz8qJ41bb92b9X6ZcBAj7SaTC42DhmFUGl';
+var accessToken = '';
 var busyFlag = false;
 
 //引入Nodejs的事件驱动模块
@@ -130,6 +130,8 @@ event.on('sendMetadata', async function () {
   // 在向SciCat后端发送元数据的过程中，busyFlag使得事件驱动不会打断sendToCatamel()的执行
   // 直至处理完队列中的数据，再允许事件驱动执行sendToCatamel()
   if (!busyFlag) {
+    // 发送前更新AccessToken，代价是MongoDB数据库会积累很多AccessToken实例，需要脚本定期清理
+    accessToken = await ingestorLogin();
     busyFlag = true;
     sendToCatamel();
   }
@@ -291,8 +293,42 @@ async function getMataDataFromStorageSystem(sourceFolder) {
 }
 
 /**
+ * ingestor用户登录，获取AccessToken
+ * @returns 
+ */
+async function ingestorLogin() {
+  return new Promise((resolve, reject) => {
+    httpReq({
+      url: url_login,
+      method: "POST",
+      json: true,
+      headers: {
+        "content-type": "application/json",
+      },
+      body: {
+        "username": "ingestor",
+        "password": "nsrl@ingestor"
+      }
+    }, function (error, response, retLoginBody) {
+      if (error) {
+        console.log({ message: "Ingestor Login Error!", detail: error });
+        console.log('-----------------------------------------------------------');
+        return;
+      }
+      if (response.statusCode == 200) {
+        console.log("retLoginBody: ", retLoginBody);
+        // 返回AccessToken
+        resolve(retLoginBody.id);
+      } else {
+        console.log({ message: "Ingestor Login Fail!", detail: response.body });
+        console.log('-----------------------------------------------------------');
+      }
+    });
+  });
+}
+
+/**
  * 将用户分组，只需传入分组名称和用户数组，SciCat后端会处理
- * 因为这是第一个涉及到accessToken的HTTP请求，所以在此方法嵌入更新accessToken逻辑
  * @param {*} userGroupBody 
  */
 async function addUserGroup(userGroupBody) {
@@ -306,57 +342,17 @@ async function addUserGroup(userGroupBody) {
       },
       body: userGroupBody
     }, function (error, response, retUserGroupBody) {
-      // 如果accessToken过期，先更新accessToken
-      if (response.statusCode == 401) {
-        httpReq({
-          url: url_login,
-          method: "POST",
-          json: true,
-          headers: {
-            "content-type": "application/json",
-          },
-          body: {
-            "username": "ingestor",
-            "password": "nsrl@ingestor"
-          }
-        }, function (error, response, loginBody) {
-          if (error) {
-            console.log({ statusCode: 500, message: "Ingestor Login Error!", detail: error});
-            console.log('-----------------------------------------------------------');
-            return;
-          }
-          if (!error && response.statusCode == 200) {
-            accessToken = loginBody.id;
-            // accessToken更新完毕，开始用户分组
-            httpReq({
-              url: `${url_addUserGroup}?access_token=${accessToken}`,
-              method: "POST",
-              json: true,
-              headers: {
-                "content-type": "application/json",
-              },
-              body: userGroupBody
-            }, function (error, response, retUserGroupBody) {
-              if (error) {
-                console.log({ statusCode: 500, message: "POST UserGroup Error!", detail: error});
-                console.log('-----------------------------------------------------------');
-                return;
-              }
-              if (!error && response.statusCode == 200) {
-                console.log('retUserGroupBody: ', retUserGroupBody);
-                resolve(retUserGroupBody);
-              }
-            });
-          }
-        });
-      // accessToken没过期
-      } else if (!error && response.statusCode == 200) {
+      if (error) {
+        console.log({ message: "POST UserGroup Error!", detail: error });
+        console.log('-----------------------------------------------------------');
+        return;
+      }
+      if (response.statusCode == 200) {
         console.log('retUserGroupBody: ', retUserGroupBody);
         resolve(retUserGroupBody);
       } else {
-        console.log({ statusCode: 500, message: "POST UserGroup Error!", detail: error});
+        console.log({ message: "POST UserGroup Fail!", detail: response.body });
         console.log('-----------------------------------------------------------');
-        return;
       }
     });
   });
@@ -390,13 +386,16 @@ async function addProposal(proposalBody) {
             body: proposalBody
           }, function (error, response, retProposalBody) {
             if (error) {
-              console.log({ statusCode: 500, message: "POST Proposal Error!", detail: error});
+              console.log({ message: "POST Proposal Error!", detail: error });
               console.log('-----------------------------------------------------------');
               return;
             }
-            if (!error && response.statusCode == 200) {
+            if (response.statusCode == 200) {
               console.log('retProposalBody: ', retProposalBody);
               resolve(retProposalBody);
+            } else {
+              console.log({ message: "POST Proposal Fail!", detail: response.body });
+              console.log('-----------------------------------------------------------');
             }
           });
         }
@@ -434,13 +433,16 @@ async function addSample(sampleBody) {
             body: sampleBody
           }, function (error, response, retSampleBody) {
             if (error) {
-              console.log({ statusCode: 500, message: "POST Sample Error!", detail: error});
+              console.log({ message: "POST Sample Error!", detail: error });
               console.log('-----------------------------------------------------------');
               return;
             }
-            if (!error && response.statusCode == 200) {
+            if (response.statusCode == 200) {
               console.log('retSampleBody: ', retSampleBody);
               resolve(retSampleBody);
+            } else {
+              console.log({ message: "POST Sample Fail!", detail: response.body });
+              console.log('-----------------------------------------------------------');
             }
           });
         }
@@ -483,13 +485,16 @@ async function addInstrument(instrumentBody) {
           body: instrumentBody
         }, function (error, response, retInstrumentBody) {
           if (error) {
-            console.log({ statusCode: 500, message: "POST Instrument Error!", detail: error});
+            console.log({ message: "POST Instrument Error!", detail: error });
             console.log('-----------------------------------------------------------');
             return;
           }
-          if (!error && response.statusCode == 200) {
+          if (response.statusCode == 200) {
             console.log('retInstrumentBody: ', retInstrumentBody);
             resolve(retInstrumentBody);
+          } else {
+            console.log({ message: "POST Instrument Fail!", detail: response.body });
+            console.log('-----------------------------------------------------------');
           }
         });
       }
@@ -516,13 +521,16 @@ async function addRawDataset(rawDatasetBody) {
       body: rawDatasetBody
     }, function (error, response, retRawDatasetBody) {
       if (error) {
-        console.log({ statusCode: 500, message: "POST RawDataset Error!", detail: error});
+        console.log({ message: "POST RawDataset Error!", detail: error });
         console.log('-----------------------------------------------------------');
         return;
       }
-      if (!error && response.statusCode == 200) {
+      if (response.statusCode == 200) {
         console.log('retRawDatasetBody: ', retRawDatasetBody);
         resolve(retRawDatasetBody);
+      } else {
+        console.log({ message: "POST RawDataset Fail!", detail: response.body });
+        console.log('-----------------------------------------------------------');
       }
     });
   });
@@ -545,13 +553,16 @@ async function addOrigDatablock(origDatablockBody) {
       body: origDatablockBody
     }, function (error, response, retOrigDatablock) {
       if (error) {
-        console.log({ statusCode: 500, message: "POST OrigDatablock Error!", detail: error});
+        console.log({ message: "POST OrigDatablock Error!", detail: error });
         console.log('-----------------------------------------------------------');
         return;
       }
-      if (!error && response.statusCode == 200) {
+      if (response.statusCode == 200) {
         console.log('retOrigDatablock: ', retOrigDatablock);
         resolve(retOrigDatablock);
+      } else {
+        console.log({ message: "POST OrigDatablock Fail!", detail: response.body });
+        console.log('-----------------------------------------------------------');
       }
     });
   });
@@ -574,13 +585,16 @@ async function addAttachment(attachmentBody) {
         body: attachmentBody
       }, function (error, response, retAttachment) {
         if (error) {
-          console.log({ statusCode: 500, message: "POST Attachment Error!", detail: error});
+          console.log({ message: "POST Attachment Error!", detail: error });
           console.log('-----------------------------------------------------------');
           return;
         }
-        if (!error && response.statusCode == 200) {
+        if (response.statusCode == 200) {
           console.log('retAttachment: ', retAttachment);
           resolve(retAttachment);
+        } else {
+          console.log({ message: "POST Attachment Fail!", detail: response.body });
+          console.log('-----------------------------------------------------------');
         }
       });
     }
