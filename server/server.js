@@ -270,12 +270,8 @@ async function getMataDataFromStorageSystem(sourceFolder) {
     // 客户端HTTP请求最大等待时间timeout设为5分钟，服务端也需要设置timeout才起效
     // 否则nodejs默认timeout为2分钟
 
-    // url参数中包含中文，需要进行编码
-    var sourceFolder_encode =encodeURI(sourceFolder);
-    console.log("sourceFolder_encode: ", sourceFolder_encode);
-
     httpReq({
-      url: `${url_StorageSystem}?sourceFolder=${sourceFolder_encode}`,
+      url: `${url_StorageSystem}?sourceFolder=${sourceFolder}`,
       method: "GET",
       timeout: 300000,
     }, function (error, response, retStorageMetaBody) {
